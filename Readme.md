@@ -142,3 +142,29 @@ Open http://localhost:4200/
 - **Firebase access issues** → Ask Suanloh
 - **Gemini API issues** → Check https://aistudio.google.com/app/apikey
 - **Code issues** → Post in team chat
+
+# where di I work?
+```bash
+BIW/
+├── src/
+│   ├── app/
+│   │   ├── components/         👈 FRONTEND works here
+│   │   │   ├── dashboard/
+│   │   │   ├── task-list/
+│   │   │   └── user-profile/
+│   │   │
+│   │   ├── services/           👈 BACKEND logic works here
+│   │   │   ├── gemini. ts       (AI service)
+│   │   │   ├── auth.service.ts (Authentication)
+│   │   │   ├── task.service.ts (Database operations)
+│   │   │   └── user.service.ts (User data)
+│   │   │
+│   │   ├── models/             👈 BACKEND defines data structure
+│   │   │   ├── task.model. ts
+│   │   │   └── user.model.ts
+│   │   │
+│   │   ├── app.ts              👈 FRONTEND (main component)
+│   │   └── app.config.ts       👈 BACKEND (Firebase/API config)
+│   │
+│   └── environments/           👈 BACKEND (API keys, config)
+```
