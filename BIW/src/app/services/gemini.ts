@@ -12,8 +12,11 @@ export class GeminiService {
   constructor() {
     // Initialize the Google AI Client
     this.genAI = new GoogleGenerativeAI(environment.geminiApiKey);
-    // Select the specific model (gemini-1.5-flash is fast and cheap)
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Use the correct model name (try these in order)
+    this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    // Alternative models if gemini-pro doesn't work: 
+    // this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    // this.model = this.genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
   }
 
   // This is the function your team will call
@@ -24,7 +27,7 @@ export class GeminiService {
       return response.text();
     } catch (error) {
       console.error("Gemini Error:", error);
-      return "Error: Could not connect to Gemini. Check your API Key.";
+      return "Error:  Could not connect to Gemini.  Check your API Key.";
     }
   }
 }
