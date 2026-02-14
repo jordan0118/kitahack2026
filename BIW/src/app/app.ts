@@ -1,8 +1,9 @@
-import { Component, inject } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { GeminiService } from './services/gemini';
-import { Firestore, collection, getDocs } from '@angular/fire/firestore';
-import { environment } from '../environments/environment';
+import { SupabaseService } from './services/supabase.service';
+import { ReceiptService } from './services/receipt.service';
+import { MealService } from './services/meal.service';
 
 @Component({
   selector: 'app-root',
@@ -10,37 +11,49 @@ import { environment } from '../environments/environment';
   imports: [CommonModule],
   template: `
     <div style="padding: 20px; font-family: sans-serif; max-width: 800px; margin: 0 auto;">
-      <h1>Project Leader Dashboard</h1>
+      <h1>🚀 Supabase + Gemini Dashboard</h1>
 
-      <div style="margin:  20px 0;">
+      <!-- Auth Status -->
+      <div style="margin: 20px 0; padding: 15px; background: #e8f5e9; border-radius: 4px;">
+        <strong>Auth Status:</strong> {{ authStatus }}
+        @if (!isAuthenticated) {
+          <button (click)="signIn()" style="margin-left: 10px; padding: 5px 10px; cursor: pointer;">
+            Sign In Anonymously
+          </button>
+        } @else {
+          <button (click)="signOut()" style="margin-left: 10px; padding: 5px 10px; cursor: pointer; background: #ef4444; color: white; border: none; border-radius: 4px;">
+            Sign Out
+          </button>
+        }
+      </div>
+
+      <hr style="margin: 30px 0;">
+
+      <!-- Test AI -->
+      <div style="margin: 20px 0;">
         <button 
           (click)="testAI()" 
           [disabled]="aiLoading"
-          style="padding: 10px 20px; font-size: 16px; cursor: pointer; background:  #4285f4; color: white; border: none; border-radius: 4px;">
-          {{ aiLoading ? '⏳ Thinking.. .' : '🤖 Test Gemini AI' }}
+          style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4285f4; color: white; border: none; border-radius: 4px;">
+          {{ aiLoading ? '⏳ Thinking...' : '🤖 Test Gemini AI' }}
         </button>
         
         <div style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 4px; min-height: 60px;">
           <strong>AI Says:</strong>
           <p style="margin: 5px 0 0 0; white-space: pre-wrap;">{{ aiResponse }}</p>
-          
-          @if (aiLoading) {
-            <div style="margin-top: 10px; color: #666;">
-              <div style="display:  inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4285f4; animation: pulse 1s infinite;"></div>
-              <span style="margin-left: 8px;">AI is processing your request...  (typically 2-5 seconds)</span>
-            </div>
-          }
         </div>
       </div>
 
       <hr style="margin: 30px 0;">
 
-      <div style="margin:  20px 0;">
+      <!-- Test Database -->
+      <div style="margin: 20px 0;">
         <button 
-          (click)="testFirebase()" 
-          [disabled]="dbLoading"
-          style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #f4b400; color: white; border:  none; border-radius: 4px;">
-          {{ dbLoading ? '⏳ Connecting...' : '🔥 Test Database' }}
+          (click)="testDatabase()" 
+          [disabled]="dbLoading || !isAuthenticated"
+          style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #10b981; color: white; border: none; border-radius: 4px;"
+          [style.opacity]="!isAuthenticated ? '0.5' : '1'">
+          {{ dbLoading ? '⏳ Testing...' : '🗄️ Test Supabase Database' }}
         </button>
         
         <div style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
@@ -50,95 +63,241 @@ import { environment } from '../environments/environment';
 
       <hr style="margin: 30px 0;">
 
+      <!-- Test Receipt Upload -->
       <div style="margin: 20px 0;">
+        <h3>Test Receipt Upload</h3>
+        @if (!isAuthenticated) {
+          <p style="color: #ef4444;">⚠️ Please sign in first to upload receipts</p>
+        }
+        <input 
+          type="file" 
+          (change)="onFileSelected($event)" 
+          accept="image/*"
+          [disabled]="!isAuthenticated">
         <button 
-          (click)="testListModels()"
-          style="padding: 10px 20px; font-size: 16px; cursor: pointer; background:  #0f9d58; color: white; border: none; border-radius: 4px;">
-          📋 List Available Models
+          (click)="testReceiptUpload()" 
+          [disabled]="!selectedFile || uploadLoading || !isAuthenticated"
+          style="margin-left: 10px; padding: 10px 20px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer;"
+          [style.opacity]="(!selectedFile || !isAuthenticated) ? '0.5' : '1'">
+          {{ uploadLoading ? '⏳ Uploading...' : '📤 Upload Test Receipt' }}
         </button>
         
-        <pre style="margin-top: 10px; background: #f8f9fa; padding: 15px; border-radius: 4px; max-height: 300px; overflow:  auto; font-size: 12px;">{{ modelsList }}</pre>
+        <div style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
+          {{ uploadStatus }}
+        </div>
+      </div>
+
+      <hr style="margin: 30px 0;">
+
+      <!-- My Receipts -->
+      <div style="margin: 20px 0;">
+        <button 
+          (click)="loadReceipts()" 
+          [disabled]="!isAuthenticated || loadingReceipts"
+          style="padding: 10px 20px; background: #8b5cf6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+          [style.opacity]="!isAuthenticated ? '0.5' : '1'">
+          {{ loadingReceipts ? '⏳ Loading...' : '📋 Load My Receipts' }}
+        </button>
+        
+        <div style="margin-top: 10px;">
+          <strong>Total Receipts:</strong> {{ receipts.length }}
+          
+          @if (receipts.length === 0 && isAuthenticated) {
+            <p style="color: #666; font-style: italic;">No receipts yet. Upload one to get started!</p>
+          }
+          
+          @if (receipts.length > 0) {
+            <ul style="list-style: none; padding: 0;">
+              @for (receipt of receipts; track receipt.id) {
+                <li style="padding: 10px; margin: 5px 0; background: #f8f9fa; border-radius: 4px;">
+                  <strong>{{ receipt.store_name }}</strong> - 
+                  <span style="color: #10b981; font-weight: bold;">\${{ receipt.total_amount }}</span> - 
+                  <span style="color: #666;">{{ receipt.created_at | date:'short' }}</span>
+                  <br>
+                  <small style="color: #666;">{{ receipt.items?.length || 0 }} items</small>
+                </li>
+              }
+            </ul>
+          }
+        </div>
       </div>
     </div>
-
-    <style>
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-      }
-      
-      button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed !important;
-      }
-      
-      button:not(:disabled):hover {
-        filter: brightness(1.1);
-      }
-    </style>
   `
 })
-export class AppComponent {
-  private gemini = inject(GeminiService);
-  private firestore = inject(Firestore);
-
-  aiResponse = 'Waiting... ';
-  dbStatus = 'Waiting...';
-  modelsList = 'Click button to list models... ';
+export class App implements OnInit {
+  authStatus = 'Not authenticated';
+  isAuthenticated = false;
   
   aiLoading = false;
+  aiResponse = 'Click the button to test AI!';
+  
   dbLoading = false;
+  dbStatus = 'Not tested yet';
+  
+  selectedFile: File | null = null;
+  uploadLoading = false;
+  uploadStatus = 'No file selected';
+  
+  receipts: any[] = [];
+  loadingReceipts = false;
+
+  constructor(
+    private gemini: GeminiService,
+    private supabase: SupabaseService,
+    private receiptService: ReceiptService,
+    private mealService: MealService
+  ) {}
+
+  ngOnInit() {
+  // Listen for auth state changes
+  this.supabase.user$.subscribe((user: any) => {  // ← Add explicit type
+    if (user) {
+      this.authStatus = `✅ Authenticated as ${user.id.substring(0, 8)}...`;
+      this.isAuthenticated = true;
+    } else {
+      this.authStatus = '❌ Not authenticated';
+      this.isAuthenticated = false;
+      this.receipts = []; // Clear receipts on sign out
+    }
+  });
+}
+
+  async signIn() {
+    try {
+      this.authStatus = '⏳ Signing in...';
+      const user = await this.supabase.signInAnonymously();
+      if (user) {
+        this.authStatus = `✅ Signed in as ${user.id.substring(0, 8)}...`;
+        this.isAuthenticated = true;
+      } else {
+        this.authStatus = '❌ Sign in failed';
+      }
+    } catch (error: any) {
+      this.authStatus = `❌ Error: ${error.message}`;
+      console.error('Sign in error:', error);
+    }
+  }
+
+  async signOut() {
+    try {
+      await this.supabase.signOut();
+      this.authStatus = '✅ Signed out successfully';
+      this.isAuthenticated = false;
+      this.receipts = [];
+      this.selectedFile = null;
+      this.uploadStatus = 'No file selected';
+    } catch (error: any) {
+      console.error('Sign out error:', error);
+    }
+  }
 
   async testAI() {
     this.aiLoading = true;
     this.aiResponse = 'Thinking...';
     
-    const startTime = Date.now();
-    
     try {
-      this.aiResponse = await this.gemini.generateText('Hello!  Are you ready? ');
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`✅ Response received in ${duration}s`);
-    } catch (error:  any) {
-      this.aiResponse = `Error: ${error.message}`;
+      const response = await this.gemini.generateText(
+        'Tell me a fun fact about food waste and sustainability in one sentence.'
+      );
+      this.aiResponse = response || 'No response from AI';
+    } catch (error: any) {
+      this.aiResponse = `❌ Error: ${error.message || 'Failed to connect to Gemini AI'}`;
+      console.error('AI error:', error);
     } finally {
       this.aiLoading = false;
     }
   }
 
-  async testFirebase() {
+  async testDatabase() {
     this.dbLoading = true;
-    this.dbStatus = 'Connecting...';
+    this.dbStatus = '⏳ Testing connection...';
     
     try {
-      const ref = collection(this.firestore, 'test');
-      await getDocs(ref); 
-      this.dbStatus = '✅ Connected!  (Read success)';
-    } catch (err:  any) {
-      this.dbStatus = `❌ Connection Failed: ${err.message}`;
+      const { data, error } = await this.supabase.client
+        .from('receipts')
+        .select('count');
+      
+      if (error) throw error;
+      this.dbStatus = `✅ Connected! Database is working. (Count query successful)`;
+    } catch (error: any) {
+      this.dbStatus = `❌ Error: ${error.message}`;
+      console.error('Database error:', error);
     } finally {
-      this. dbLoading = false;
+      this.dbLoading = false;
     }
   }
 
-  async testListModels() {
-    this.modelsList = 'Loading... ';
+  onFileSelected(event: any) {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        this.uploadStatus = '❌ Please select an image file';
+        this.selectedFile = null;
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        this.uploadStatus = '❌ File too large (max 5MB)';
+        this.selectedFile = null;
+        return;
+      }
+      
+      this.selectedFile = file;
+      this.uploadStatus = `✅ Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    }
+  }
+
+  async testReceiptUpload() {
+    if (!this.selectedFile) {
+      this.uploadStatus = '❌ No file selected';
+      return;
+    }
     
-    const url = `https://generativelanguage.googleapis.com/v1beta/models? key=${environment.geminiApiKey}`;
+    this.uploadLoading = true;
+    this.uploadStatus = '⏳ Uploading image and saving data...';
     
     try {
-      const response = await fetch(url);
-      const data = await response.json();
+      const result = await this.receiptService.uploadReceipt(
+        this.selectedFile,
+        {
+          store_name: 'Test Store',
+          total_amount: 99.99,
+          currency: 'USD',
+          items: [
+            { name: 'Test Item 1', price: 50.00, quantity: 1 },
+            { name: 'Test Item 2', price: 49.99, quantity: 1 }
+          ]
+        }
+      );
       
-      if (response.ok) {
-        console.log('Available models:', data);
-        const models = data.models?. map((m: any) => m.name).join('\n') || 'No models found';
-        this.modelsList = `✅ Available models:\n\n${models}`;
-      } else {
-        this.modelsList = `❌ Error: ${data.error?. message || 'Unknown error'}`;
-      }
+      this.uploadStatus = `✅ Success! Receipt ID: ${result.receiptId}`;
+      
+      // Auto-reload receipts after upload
+      setTimeout(() => this.loadReceipts(), 500);
+      
+      // Clear file input
+      this.selectedFile = null;
     } catch (error: any) {
-      this.modelsList = `❌ Network error: ${error.message}`;
+      this.uploadStatus = `❌ Error: ${error.message}`;
+      console.error('Upload error:', error);
+    } finally {
+      this.uploadLoading = false;
+    }
+  }
+
+  async loadReceipts() {
+    this.loadingReceipts = true;
+    
+    try {
+      this.receipts = await this.receiptService.getUserReceipts();
+      console.log('Loaded receipts:', this.receipts);
+    } catch (error: any) {
+      console.error('Error loading receipts:', error);
+      alert(`Failed to load receipts: ${error.message}`);
+    } finally {
+      this.loadingReceipts = false;
     }
   }
 }

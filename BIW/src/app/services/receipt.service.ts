@@ -1,0 +1,228 @@
+import { Injectable } from '@angular/core';
+import { SupabaseService } from './supabase.service';
+
+export interface ReceiptItem {
+  name: string;
+  price: number;
+  quantity: number;
+  category?: string;
+  expiryDays?: number;
+}
+
+export interface Receipt {
+  id?: string;
+  user_id?: string;
+  image_url: string;
+  store_name?: string;
+  purchase_date: string;
+  total_amount: number;
+  currency: string;
+  items: ReceiptItem[];
+  processed: boolean;
+  created_at?: string;
+}
+
+@Injectable({
+  providedIn: 'root'
+})
+export class ReceiptService {
+  constructor(private supabase: SupabaseService) {}
+
+  /**
+   * Upload receipt image to Supabase Storage
+   */
+  async uploadReceiptImage(file: File): Promise<string> {
+    try {
+      const userId = this.supabase.userId;
+      if (!userId) throw new Error('User not authenticated');
+
+      const timestamp = Date.now();
+      const fileName = `${timestamp}_${file.name}`;
+      const filePath = `${userId}/${fileName}`;
+
+      const { data, error } = await this.supabase.client.storage
+        .from('receipts')
+        .upload(filePath, file);
+
+      if (error) throw error;
+
+      // Get public URL
+      const { data: urlData } = this.supabase.client.storage
+        .from('receipts')
+        .getPublicUrl(filePath);
+
+      console.log('✅ Receipt image uploaded:', urlData.publicUrl);
+      return urlData.publicUrl;
+    } catch (error) {
+      console.error('❌ Error uploading receipt image:', error);
+      throw new Error('Failed to upload receipt image');
+    }
+  }
+
+  /**
+   * Save receipt data to Supabase
+   */
+  async saveReceipt(receipt: Omit<Receipt, 'id' | 'user_id' | 'created_at'>): Promise<string> {
+    try {
+      const userId = this.supabase.userId;
+      if (!userId) throw new Error('User not authenticated');
+
+      const { data, error } = await this.supabase.client
+        .from('receipts')
+        .insert([{
+          ...receipt,
+          user_id: userId
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Receipt saved with ID:', data.id);
+      return data.id;
+    } catch (error) {
+      console.error('❌ Error saving receipt:', error);
+      throw new Error('Failed to save receipt');
+    }
+  }
+
+  /**
+   * Complete upload: Image + Data
+   */
+  async uploadReceipt(file: File, receiptData: Partial<Receipt>): Promise<{ receiptId: string; imageUrl: string }> {
+    try {
+      // Step 1: Upload image
+      const imageUrl = await this.uploadReceiptImage(file);
+
+      // Step 2: Save receipt data
+      const receipt: Omit<Receipt, 'id' | 'user_id' | 'created_at'> = {
+        image_url: imageUrl,
+        store_name: receiptData.store_name || 'Unknown Store',
+        purchase_date: receiptData.purchase_date || new Date().toISOString(),
+        total_amount: receiptData.total_amount || 0,
+        items: receiptData.items || [],
+        currency: receiptData.currency || 'USD',
+        processed: false
+      };
+
+      const receiptId = await this.saveReceipt(receipt);
+
+      return { receiptId, imageUrl };
+    } catch (error) {
+      console.error('❌ Error in uploadReceipt:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all receipts for current user
+   */
+  async getUserReceipts(): Promise<Receipt[]> {
+    try {
+      const userId = this.supabase.userId;
+      if (!userId) throw new Error('User not authenticated');
+
+      const { data, error } = await this.supabase.client
+        .from('receipts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      console.log(`✅ Found ${data.length} receipts`);
+      return data as Receipt[];
+    } catch (error) {
+      console.error('❌ Error fetching receipts:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get single receipt by ID
+   */
+  async getReceiptById(receiptId: string): Promise<Receipt | null> {
+    try {
+      const { data, error } = await this.supabase.client
+        .from('receipts')
+        .select('*')
+        .eq('id', receiptId)
+        .single();
+
+      if (error) throw error;
+      return data as Receipt;
+    } catch (error) {
+      console.error('❌ Error fetching receipt:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update receipt (e.g., after AI processing)
+   */
+  async updateReceipt(receiptId: string, updates: Partial<Receipt>): Promise<void> {
+    try {
+      const { error } = await this.supabase.client
+        .from('receipts')
+        .update(updates)
+        .eq('id', receiptId);
+
+      if (error) throw error;
+      console.log('✅ Receipt updated:', receiptId);
+    } catch (error) {
+      console.error('❌ Error updating receipt:', error);
+      throw new Error('Failed to update receipt');
+    }
+  }
+
+  /**
+   * Delete receipt (and its image)
+   */
+  async deleteReceipt(receiptId: string): Promise<void> {
+    try {
+      const receipt = await this.getReceiptById(receiptId);
+      if (!receipt) return;
+
+      // Delete from storage
+      const urlParts = receipt.image_url.split('/receipts/');
+      if (urlParts.length > 1) {
+        const filePath = urlParts[1];
+        await this.supabase.client.storage
+          .from('receipts')
+          .remove([filePath]);
+      }
+
+      // Delete from database
+      const { error } = await this.supabase.client
+        .from('receipts')
+        .delete()
+        .eq('id', receiptId);
+
+      if (error) throw error;
+      console.log('✅ Receipt deleted:', receiptId);
+    } catch (error) {
+      console.error('❌ Error deleting receipt:', error);
+      throw new Error('Failed to delete receipt');
+    }
+  }
+
+  /**
+   * Get unprocessed receipts (for AI processing)
+   */
+  async getUnprocessedReceipts(limit: number = 10): Promise<Receipt[]> {
+    try {
+      const { data, error } = await this.supabase.client
+        .from('receipts')
+        .select('*')
+        .eq('processed', false)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return data as Receipt[];
+    } catch (error) {
+      console.error('❌ Error fetching unprocessed receipts:', error);
+      return [];
+    }
+  }
+}
